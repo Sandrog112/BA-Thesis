@@ -1,137 +1,104 @@
+import pandas as pd
+import numpy as np
 import os
 import logging
-import pandas as pd
 from sklearn.preprocessing import StandardScaler
-from datetime import datetime
 
-# Configure Logging
-LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../logs")
-os.makedirs(LOG_DIR, exist_ok=True)  
-
-log_file = os.path.join(LOG_DIR, f"data_preprocessing_{datetime.now().strftime('%Y-%m-%d_%H-%M')}.log")
+# Set up logging
+log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'logs')
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, 'data_preprocessing.log')
 logging.basicConfig(
+    filename=log_file,
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_file),  
-        logging.StreamHandler()        
-    ]
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger()
 
-# Define paths
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, "../data"))
-RAW_DATA_PATH = os.path.join(DATA_DIR, "raw.csv")  
-PREPROCESSED_DIR = os.path.join(DATA_DIR, "preprocessed") 
+def load_raw_data():
+    """Load raw commodity data from CSV file"""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    filepath = os.path.join(current_dir, '..', 'data', 'raw.csv')
+    logging.info(f"Loading data from {filepath}")
 
-os.makedirs(PREPROCESSED_DIR, exist_ok=True)
+    if not os.path.exists(filepath):
+        logging.error(f"File not found: {filepath}")
+        raise FileNotFoundError(f"The file {filepath} does not exist.")
 
-def singleton(cls):
-    instances = {}
+    df = pd.read_csv(filepath)
+    logging.info(f"Data loaded successfully with shape {df.shape}")
+    return df
 
-    def wrapper(*args, **kwargs):
-        if cls not in instances:
-            instances[cls] = cls(*args, **kwargs)
-        return instances[cls]
-    return wrapper
+def filter_commodities(df):
+    """Filter dataframe for target commodities and convert date"""
+    logging.info("Filtering for Gold, Crude Oil, and Natural Gas")
+    filtered_df = df[df['Commodity'].isin(['Gold', 'Crude Oil', 'Natural Gas'])].copy()
+    filtered_df['Date'] = pd.to_datetime(filtered_df['Date'])
+    logging.info(f"Filtered data shape: {filtered_df.shape}")
+    return filtered_df
 
-@singleton
-class CommodityPreprocessor:
-    def __init__(self):
-        self.df = None
-        self.scaler = None
-
-    def load_raw_data(self, raw_path: str) -> pd.DataFrame:
-        """
-        Loads the raw CSV data for commodities.
-        """
-        logger.info(f"Loading raw data from {raw_path}...")
-        try:
-            self.df = pd.read_csv(raw_path)
-        except FileNotFoundError:
-            logger.error(f"File not found: {raw_path}. Please ensure the path is correct.")
-            raise
-        except Exception as e:
-            logger.error(f"Failed to load raw data: {e}")
-            raise
-        return self.df
-
-    def filter_commodities(self, df: pd.DataFrame, commodities=['Gold', 'Crude Oil', 'Natural Gas']) -> pd.DataFrame:
-        """
-        Filters the dataframe to retain data for selected commodities.
-        """
-        logger.info(f"Filtering commodities: {commodities}")
-        return df[df['Commodity'].isin(commodities)].reset_index(drop=True)
-
-    def preprocess(self, df: pd.DataFrame, commodity: str, n_lags=3, save_path: str = None) -> pd.DataFrame:
-        """
-        Preprocesses data for the given commodity and saves the preprocessed data if `save_path` is provided.
-        """
-        logger.info(f"Preprocessing commodity data: {commodity}")
-
-        df_commodity = df[df['Commodity'] == commodity].copy()
-        df_commodity['Date'] = pd.to_datetime(df_commodity['Date'])
-        df_commodity.sort_values('Date', inplace=True)
-        df_commodity.reset_index(drop=True, inplace=True)
-
+def split_by_commodity(df):
+    """Split dataframe into separate dataframes for each commodity"""
+    logging.info("Splitting data by commodity")
+    commodities = {}
+    for commodity in ['Gold', 'Crude Oil', 'Natural Gas']:
+        commodity_df = df[df['Commodity'] == commodity].copy()
+        commodity_df.sort_values('Date', inplace=True)
+        commodity_df.reset_index(drop=True, inplace=True)
         columns_to_drop = ['Commodity', 'Open', 'High', 'Low']
-        df_commodity.drop(columns=columns_to_drop, inplace=True)
+        commodity_df.drop(columns=columns_to_drop, inplace=True)
+        commodity_key = commodity.replace(' ', '_').lower()
+        commodities[commodity_key] = commodity_df
+        logging.info(f"{commodity_key} data prepared with shape {commodity_df.shape}")
+    return commodities
 
-        for lag in range(1, n_lags + 1):
-            df_commodity[f'Close_lag_{lag}'] = df_commodity['Close'].shift(lag)
+def preprocessing_xgboost(df, test_size=0.2, n_lags=30):
+    """Preprocess data for XGBoost training"""
+    logging.info("Starting preprocessing for XGBoost")
+    df = df.copy()
+    df = df.sort_values('Date').reset_index(drop=True)
+    for lag in range(1, n_lags + 1):
+        df[f'Close_lag_{lag}'] = df['Close'].shift(lag)
+    df['Close_roll_mean_7'] = df['Close'].rolling(window=7).mean()
+    df['Close_roll_std_7'] = df['Close'].rolling(window=7).std()
+    df['Close_target'] = df['Close'].shift(-1)
+    df = df.dropna().reset_index(drop=True)
+    logging.info(f"Data after feature engineering: {df.shape}")
+    exog_cols = [col for col in df.columns if col not in ['Date', 'Close', 'Close_target']]
+    split_idx = int(len(df) * (1 - test_size))
+    train_df = df.iloc[:split_idx]
+    test_df = df.iloc[split_idx:]
+    scaler = StandardScaler()
+    train_X = pd.DataFrame(scaler.fit_transform(train_df[exog_cols]), columns=exog_cols)
+    test_X = pd.DataFrame(scaler.transform(test_df[exog_cols]), columns=exog_cols)
+    train_y = train_df['Close_target']
+    test_y = test_df['Close_target']
+    logging.info(f"Train/Test split: {train_X.shape[0]} train, {test_X.shape[0]} test")
+    return {
+        'train_X': train_X,
+        'test_X': test_X,
+        'train_y': train_y,
+        'test_y': test_y,
+        'scaler': scaler,
+        'exog_cols': exog_cols,
+        'train_dates': train_df['Date'],
+        'test_dates': test_df['Date']
+    }
 
-        df_commodity['Close_roll_mean_7'] = df_commodity['Close'].rolling(window=7).mean()
-        df_commodity['Close_roll_std_7'] = df_commodity['Close'].rolling(window=7).std()
+def prepare_data():
+    """Main function to prepare data for all commodities"""
+    logging.info("Starting data preparation pipeline")
+    raw_data = load_raw_data()
+    filtered_data = filter_commodities(raw_data)
+    commodity_dfs = split_by_commodity(filtered_data)
+    processed_data = {}
+    for commodity_name, df in commodity_dfs.items():
+        processed_data[commodity_name] = preprocessing_xgboost(df)
+        logging.info(f"Processed {commodity_name}: {len(df)} rows")
+    return processed_data
 
-        df_commodity['Close_target'] = df_commodity['Close'].shift(-1)
-
-        df_commodity.dropna(inplace=True)
-        df_commodity.reset_index(drop=True, inplace=True)
-
-        exog_cols = [col for col in df_commodity.columns if col not in ['Date', 'Close', 'Close_target']]
-        self.scaler = StandardScaler()
-        df_commodity[exog_cols] = self.scaler.fit_transform(df_commodity[exog_cols])
-
-        # Save preprocessed data
-        if save_path:
-            self.save(df_commodity, save_path)
-
-        logger.info(f"Preprocessing for {commodity} completed successfully.")
-        return df_commodity
-
-    def save(self, df: pd.DataFrame, out_path: str):
-        """
-        Saves the given dataframe to the specified path.
-        """
-        logger.info(f"Saving preprocessed data to: {out_path}")
-        try:
-            df.to_csv(out_path, index=False)
-        except Exception as e:
-            logger.error(f"Failed to save data to {out_path}: {e}")
-            raise
-        logger.info(f"Data successfully saved to {out_path}")
-
-
-# Main function for execution
 if __name__ == "__main__":
-    logger.info("Starting data preprocessing script...")
-
-    try:
-        preprocessor = CommodityPreprocessor()
-
-        raw_df = preprocessor.load_raw_data(RAW_DATA_PATH)
-
-        commodities = ['Gold', 'Crude Oil', 'Natural Gas']
-        filtered_df = preprocessor.filter_commodities(raw_df, commodities)
-
-        for commodity in commodities:
-            save_path = os.path.join(PREPROCESSED_DIR, f"{commodity.lower().replace(' ', '_')}_preprocessed.csv")
-            preprocessed_df = preprocessor.preprocess(filtered_df, commodity=commodity, save_path=save_path)
-
-            logger.info(f"Processed and saved data for {commodity}: {preprocessed_df.shape[0]} rows, {preprocessed_df.shape[1]} columns.")
-
-        logger.info("Data preprocessing completed successfully.")
-
-    except Exception as e:
-        logger.error(f"An error occurred during processing: {e}")
+    logging.info("Running data preprocessing script")
+    data = prepare_data()
+    logging.info("Data preprocessing complete!")
+    for commodity, dataset in data.items():
+        logging.info(f"{commodity}: {dataset['train_X'].shape[0]} training samples, {dataset['test_X'].shape[0]} testing samples")
