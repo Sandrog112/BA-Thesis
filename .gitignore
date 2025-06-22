@@ -3,11 +3,17 @@ __pycache__/
 *.py[cod]
 .vscode
 
-# Directories
+# Ignore data folder
 data/
-models/
-performance/
+
+# Ignore logs folder
 logs/
+
+# Ignore models folder
+models/
+
+# Ignore performance folder
+performance/
 
 # File Extensions
 *.csv
