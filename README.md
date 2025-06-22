@@ -1,4 +1,4 @@
-# Predictive-Analysis-and-Forecasting-of-Commodity-Market-Dynamics
+# Predictive Analysis and Forecasting of Commodity Market Dynamics
 
 ## Project Overview
 
@@ -63,3 +63,54 @@ Predictive-Analysis-and-Forecasting-of-Commodity-Market-Dynamics
 
 ```
 
+## Execution Guide
+
+### Data Preprocessing
+
+The data preprocessing step converts raw time series data into a supervised learning format suitable for XGBoost regression. This process includes:
+
+- Generating lag features for the **Close** price.  
+- Calculating 7-day rolling mean and standard deviation of the **Close** price.  
+- Creating the target variable as the next day's **Close** price.  
+- Splitting the data into training and testing sets (default 80/20 split).  
+- Scaling feature columns using `StandardScaler`.
+
+The preprocessing code is implemented in the `src/data_preprocessing.py` file.
+
+To prepare raw data and make it fully trainable run the following command:
+
+```bash
+python src/data_preprocessing.py
+```
+
+### Model Training
+
+The training of our best performing model (experimented and proved in the `notebook.ipyn`) XGBoost is handled by the `train.py` script located in the `train` folder. 
+
+After preprocessing is done, to train the model, simply run the following command:
+
+```bash
+python src/train/train.py
+```
+
+### Model Inference
+
+Once the model is trained, it can be used for inference. The inference pipeline is implemented in the `inference.py` file, located in `inference` folder. 
+
+To run the inference locally, run this command:
+
+```bash
+python src/inference/inference.py
+```
+
+## Wrap up
+
+After doing all these steps, gitignored files will show up. Logs folder will include all the commands and code run user has performed so far. Models folder will include the models trained through the repository and performance folder will show all the metrics and predictions plots for each commodity. By folowing this setup, you should be able to process data, train models and run inference. 
+
+## Acknowledgements
+
+- International School of Economics (ISET) at TSU
+
+- Shota Natenadze - Supervisor, for the guidance throughout the project
+
+- Kaggle - for providing access to the dataset used in this project.
