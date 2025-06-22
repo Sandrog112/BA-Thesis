@@ -3,9 +3,6 @@
 *.py[cod]
 .vscode
 
-# Ignore data folder
-data/
-
 # Ignore logs folder
 logs/
 
