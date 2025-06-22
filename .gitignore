@@ -1,0 +1,26 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+.vscode
+
+# Directories
+data/
+models/
+performance/
+logs/
+
+# File Extensions
+*.csv
+*.pickle
+*.pyc
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Environment Variables
+venv/
+.env/
+.venv/
+
+# Installer logs
+pip-log.txt
