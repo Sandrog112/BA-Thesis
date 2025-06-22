@@ -13,7 +13,6 @@ models/
 performance/
 
 # File Extensions
-*.csv
 *.pickle
 *.pyc
 
